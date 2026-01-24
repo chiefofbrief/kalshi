@@ -29,19 +29,26 @@
 
 ## Scripts to Build
 
-### 1. Event Drill-Down Tool
+### 1. Event Drill-Down Tool ✅ COMPLETE
 **Purpose**: Bridge gap between discovery (platform_snapshot.py) and execution
+
+**Script**: `event_drilldown.py`
 
 **What it does**:
 - Takes event ticker as input (e.g., `FED-26JAN24`)
-- Displays ALL markets within that event in a readable table
-- Shows each market's strike/outcome, current YES price, volume, spread
-- Identifies if event is mutually exclusive (for arb analysis)
+- Displays ALL markets within that event in a compact, readable table
+- Shows each market's outcome, YES price, bid/ask, spread, volume, open interest
+- Identifies if event is mutually exclusive and calculates sum of YES prices
+- **Built-in arbitrage analysis**: Flags when sum ≠ $1.00 for mutually exclusive events
+- Supports sorting by: price (default), volume, strike, spread
+- Export formats: console (rich), JSON, CSV
 
-**Value**:
-- Understand the full probability distribution traders expect
-- See all betting options before placing trade
-- Foundation for Strategies 2, 5, 6, 7 (Range Bets, Spreads, etc.)
+**Usage**:
+```bash
+python event_drilldown.py FED-26JAN29              # Basic drill-down
+python event_drilldown.py KXNEWPOPE-70 --sort volume  # Sort by liquidity
+python event_drilldown.py CPI-26FEB14 -o data.json --output-format json
+```
 
 **Key endpoints**: `GET /events/{ticker}` with `with_nested_markets=true`
 
@@ -50,11 +57,15 @@
 ### 2. Mutually Exclusive Validator (Sum-of-Probabilities Check)
 **Purpose**: Find mechanical arbitrage opportunities (Strategy 5 from notes)
 
+**Status**: Partially complete - arb analysis built into `event_drilldown.py`
+
 **What it does**:
 - Scans events where `mutually_exclusive=true`
 - Sums YES prices across all markets in the event
 - Flags events where sum ≠ $1.00 (e.g., sum = 95¢)
 - Calculates potential profit after fees
+
+**Current capability**: Event Drill-Down already shows sum of YES prices and flags arbitrage opportunities for individual events. Missing: batch scanning across all mutually exclusive events.
 
 **Value**:
 - Risk-free (minus fees) arbitrage opportunities
@@ -236,8 +247,8 @@
 
 ## Immediate Next Steps
 
-1. **Test platform_snapshot.py with Age column** - Ensure new column displays correctly
-2. **Build Event Drill-Down script** - Most valuable next tool for manual trading
+1. ✅ **Test platform_snapshot.py with Age column** - Complete
+2. ✅ **Build Event Drill-Down script** - Complete (`event_drilldown.py`)
 3. **Manually test Strategy 1 (Certainty Gap)** - Run snapshot with `--min-price 90`, pick 3-5 markets, paper trade for 1-2 weeks
 4. **Manually test Strategy 4 (Domain Expertise)** - Run snapshot with `--category Economics`, research 2-3 events, track decisions
 5. **Document learnings** - What worked, what didn't, refine filters/thresholds
