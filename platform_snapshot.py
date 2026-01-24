@@ -143,14 +143,15 @@ EXAMPLE OUTPUT:
     Events Table Columns:
     - Event: Title of the event
     - Category: Market category
-    - Close Date: When the market closes for trading
+    - Age: Time since event was created (e.g., "2d", "1w", "3mo")
+    - Close: Time until market closes (e.g., "6d", "2w", "Closed")
     - Volume: Total historical volume
     - Vol 24h: Volume in last 24 hours
     - Open Int: Current open interest (active positions)
     - Price Range: Min-Max prices across all markets in event
       * "$0.92-$0.99" = likely winner is clear (certainty gap opportunity)
       * "$0.35-$0.65" = uncertain outcome (value bet opportunity)
-    - Markets: Number of markets in this event
+    - Mkts: Number of markets in this event
 
 TRADING STRATEGIES SUPPORTED:
 
@@ -492,13 +493,39 @@ def format_close_date(close_dt: datetime) -> str:
         return f"{months}mo"
 
 
+def format_age(created_dt: datetime) -> str:
+    """Format event age (time since creation) as readable string."""
+    if created_dt == datetime.min.replace(tzinfo=None):
+        return "Unknown"
+    now = datetime.utcnow()
+    delta = now - created_dt.replace(tzinfo=None)
+
+    if delta.days == 0:
+        hours = delta.seconds // 3600
+        if hours == 0:
+            return "<1h"
+        return f"{hours}h"
+    elif delta.days < 7:
+        return f"{delta.days}d"
+    elif delta.days < 30:
+        weeks = delta.days // 7
+        return f"{weeks}w"
+    elif delta.days < 365:
+        months = delta.days // 30
+        return f"{months}mo"
+    else:
+        years = delta.days // 365
+        return f"{years}y"
+
+
 def create_events_table(events: List[Dict[str, Any]], title: str, console: Console, limit: Optional[int] = None):
     """Helper to create events table with standardized columns."""
     events_table = Table(box=box.ROUNDED, show_header=True, header_style="bold magenta")
     events_table.add_column("#", justify="right", style="dim", width=3)
-    events_table.add_column("Event", style="white", width=35, no_wrap=False)
-    events_table.add_column("Category", style="cyan", width=11)
-    events_table.add_column("Close", style="blue", width=6)
+    events_table.add_column("Event", style="white", width=33, no_wrap=False)
+    events_table.add_column("Category", style="cyan", width=10)
+    events_table.add_column("Age", style="dim", width=4)
+    events_table.add_column("Close", style="blue", width=5)
     events_table.add_column("Volume", justify="right", style="yellow", width=7)
     events_table.add_column("Vol 24h", justify="right", style="yellow", width=7)
     events_table.add_column("Open Int", justify="right", style="green", width=7)
@@ -519,7 +546,8 @@ def create_events_table(events: List[Dict[str, Any]], title: str, console: Conso
         events_table.add_row(
             str(i),
             title_str,
-            event.get('category', 'Unknown')[:12],
+            event.get('category', 'Unknown')[:10],
+            format_age(event.get('created_time', datetime.min.replace(tzinfo=None))),
             format_close_date(event.get('closest_close_time', datetime.max.replace(tzinfo=None))),
             format_number(event['calculated_volume']),
             format_number(event['calculated_volume_24h']),
