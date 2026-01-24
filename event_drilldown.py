@@ -447,64 +447,54 @@ def display_with_rich(analysis: Dict[str, Any]):
         else:
             console.print(Panel(arb['description'], border_style="dim", title="Market Efficiency"))
 
-    # Markets table
+    # Markets table - compact design for typical terminal widths (~80-100 chars)
     console.print(f"\n[bold cyan]ALL MARKETS (sorted by {summary['sort_by']})[/bold cyan]\n")
 
     markets_table = Table(box=box.ROUNDED, show_header=True, header_style="bold magenta")
-    markets_table.add_column("#", justify="right", style="dim", width=3)
-    markets_table.add_column("Market/Outcome", style="white", width=28, no_wrap=False)
-    markets_table.add_column("Ticker", style="dim", width=20)
-    markets_table.add_column("YES", justify="right", style="green", width=6)
-    markets_table.add_column("NO", justify="right", style="red", width=6)
-    markets_table.add_column("Bid", justify="right", style="cyan", width=5)
-    markets_table.add_column("Ask", justify="right", style="cyan", width=5)
-    markets_table.add_column("Spread", justify="right", style="yellow", width=6)
-    markets_table.add_column("Volume", justify="right", style="blue", width=7)
-    markets_table.add_column("Vol 24h", justify="right", style="blue", width=7)
-    markets_table.add_column("Open Int", justify="right", style="magenta", width=7)
-    markets_table.add_column("Close", justify="right", style="dim", width=5)
+    markets_table.add_column("#", justify="right", style="dim", width=2)
+    markets_table.add_column("Outcome", style="white", width=22, no_wrap=True, overflow="ellipsis")
+    markets_table.add_column("YES", justify="right", style="green", width=4)
+    markets_table.add_column("Bid/Ask", justify="center", style="cyan", width=7)
+    markets_table.add_column("Sprd", justify="right", style="yellow", width=4)
+    markets_table.add_column("Volume", justify="right", style="blue", width=6)
+    markets_table.add_column("24h", justify="right", style="blue", width=5)
+    markets_table.add_column("OI", justify="right", style="magenta", width=5)
 
     for i, market in enumerate(markets, 1):
         outcome = market['outcome']
-        if len(outcome) > 28:
-            outcome = outcome[:25] + "..."
+        if len(outcome) > 22:
+            outcome = outcome[:19] + "..."
 
-        ticker = market.get('ticker', '')
-        if len(ticker) > 20:
-            ticker = ticker[:17] + "..."
+        # Combine bid/ask into compact format
+        bid = market['yes_bid_cents']
+        ask = market['yes_ask_cents']
+        if bid > 0 and ask > 0:
+            bid_ask_str = f"{bid}/{ask}"
+        elif bid > 0:
+            bid_ask_str = f"{bid}/-"
+        elif ask > 0:
+            bid_ask_str = f"-/{ask}"
+        else:
+            bid_ask_str = "-"
 
-        spread_str = f"{market['spread_cents']}¢" if market['spread_cents'] is not None else "-"
-
-        # Highlight high-value markets (90-97 cents range)
-        yes_style = "green"
-        if 90 <= market['yes_price_cents'] <= 97:
-            yes_style = "green bold"
-        elif market['yes_price_cents'] > 97:
-            yes_style = "green dim"
+        spread_str = str(market['spread_cents']) if market['spread_cents'] is not None else "-"
 
         markets_table.add_row(
             str(i),
             outcome,
-            ticker,
             f"{market['yes_price_cents']}¢",
-            f"{market['no_price_cents']}¢",
-            f"{market['yes_bid_cents']}¢" if market['yes_bid_cents'] > 0 else "-",
-            f"{market['yes_ask_cents']}¢" if market['yes_ask_cents'] > 0 else "-",
+            bid_ask_str,
             spread_str,
             format_number(market['volume']),
             format_number(market['volume_24h']),
-            format_number(market['open_interest']),
-            format_close_time(market['close_time_dt'])
+            format_number(market['open_interest'])
         )
 
     console.print(markets_table)
 
     # Footer with tips
-    console.print("\n[dim]Tips:[/dim]")
-    console.print("[dim]  - YES + NO = 100¢ (prices are complementary)[/dim]")
-    console.print("[dim]  - Lower spread = more efficient market (less friction)[/dim]")
-    console.print("[dim]  - For mutually exclusive events, sum of YES prices should ≈ $1.00[/dim]")
-    console.print("[dim]  - Markets priced 90-97¢ may have room to run (certainty gap)[/dim]")
+    console.print("\n[dim]Column guide: YES=last price, Bid/Ask=best bid/ask, Sprd=spread, OI=open interest[/dim]")
+    console.print("[dim]Tip: For mutually exclusive events, sum of YES prices should ≈ $1.00[/dim]")
     console.print()
 
 
