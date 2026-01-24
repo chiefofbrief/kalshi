@@ -675,36 +675,6 @@ def display_with_rich(snapshot: Dict[str, Any], top_n: int = 25):
 
     console.print()
 
-    # Top Series Table
-    console.print(f"\n[bold cyan]TOP {top_n} SERIES BY VOLUME[/bold cyan]\n")
-    series_table = Table(box=box.ROUNDED, show_header=True, header_style="bold magenta")
-    series_table.add_column("#", justify="right", style="dim", width=3)
-    series_table.add_column("Series", style="white", max_width=45)
-    series_table.add_column("Category", style="cyan", no_wrap=True)
-    series_table.add_column("Frequency", style="blue", no_wrap=True)
-    series_table.add_column("Volume", justify="right", style="yellow")
-
-    all_series = []
-    for series_list in snapshot['series_by_category'].values():
-        all_series.extend(series_list)
-    all_series.sort(key=lambda x: x.get('volume', 0), reverse=True)
-
-    for i, series in enumerate(all_series[:top_n], 1):
-        title = series.get('title', 'Unknown')
-        if len(title) > 45:
-            title = title[:42] + "..."
-
-        series_table.add_row(
-            str(i),
-            title,
-            series.get('category', 'Unknown'),
-            series.get('frequency', 'Unknown'),
-            format_number(series.get('volume', 0))
-        )
-
-    console.print(series_table)
-    console.print()
-
 
 def display_plain(snapshot: Dict[str, Any], top_n: int = 25):
     """Plain text output for when rich is not available."""
