@@ -115,6 +115,7 @@ class MEScanner:
         min_price: int = 0,
         max_price: int = 100,
         min_volume: int = 0,
+        min_arb: int = 3,
         category_filter: Optional[str] = None,
         sort_by: str = 'price'
     ) -> Dict[str, Any]:
@@ -126,13 +127,14 @@ class MEScanner:
             min_price: Minimum price filter (at least one market must be >= this)
             max_price: Maximum price filter (at least one market must be <= this)
             min_volume: Minimum total volume for event
+            min_arb: Minimum arb deviation to include (filters out noise near $1.00)
             category_filter: Filter to specific category
             sort_by: Sort method (price, volume, arb, closing)
 
         Returns:
             Dictionary with scan results
         """
-        print(f"Scanning for ME events (price {min_price}-{max_price}¢)...", file=sys.stderr)
+        print(f"Scanning for ME events (price {min_price}-{max_price}¢, min arb ±{min_arb}¢)...", file=sys.stderr)
 
         me_events = []
 
@@ -220,6 +222,10 @@ class MEScanner:
             # Calculate arbitrage metrics
             arb_deviation = sum_yes - 100  # cents from $1.00
 
+            # Filter out noise near $1.00 (e.g., 98-102 range is likely just spread)
+            if abs(arb_deviation) < min_arb:
+                continue
+
             me_events.append({
                 'event_ticker': event.get('event_ticker', ''),
                 'title': event.get('title', ''),
@@ -259,6 +265,7 @@ class MEScanner:
                     'min_price': min_price,
                     'max_price': max_price,
                     'min_volume': min_volume,
+                    'min_arb': min_arb,
                     'category': category_filter
                 },
                 'sort_by': sort_by
@@ -318,8 +325,10 @@ def display_with_rich(results: Dict[str, Any]):
 
     filters = meta['filters']
     filter_str = f"Price range: {filters['min_price']}-{filters['max_price']}¢"
+    if filters['min_arb'] > 0:
+        filter_str += f", arb ±{filters['min_arb']}¢+"
     if filters['min_volume'] > 0:
-        filter_str += f", min volume: {format_number(filters['min_volume'])}"
+        filter_str += f", min vol: {format_number(filters['min_volume'])}"
     if filters['category']:
         filter_str += f", category: {filters['category']}"
     header.append(f"Filters: {filter_str}\n", style="dim")
@@ -476,6 +485,12 @@ Examples:
         help='Minimum total volume for event (default: 0)'
     )
     parser.add_argument(
+        '--min-arb',
+        type=int,
+        default=3,
+        help='Minimum arb deviation in cents to include (default: 3, filters out 98-102 noise)'
+    )
+    parser.add_argument(
         '--category',
         type=str,
         help='Filter to specific category'
@@ -513,6 +528,7 @@ Examples:
             min_price=args.min_price,
             max_price=args.max_price,
             min_volume=args.min_volume,
+            min_arb=args.min_arb,
             category_filter=args.category,
             sort_by=args.sort
         )
