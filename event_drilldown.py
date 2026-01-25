@@ -398,12 +398,14 @@ def display_with_rich(analysis: Dict[str, Any]):
     # Header panel with event info
     header = Text()
     header.append("EVENT DRILL-DOWN\n", style="bold cyan")
+    header.append("\n")
     # Create clickable hyperlink for the event title
     event_ticker = event['ticker']
     if event_ticker:
-        header.append(f"\n[link=https://kalshi.com/markets/{event_ticker}]{event['title']}[/link]\n", style="bold white")
+        header.append_text(Text.from_markup(f"[link=https://kalshi.com/markets/{event_ticker}]{event['title']}[/link]", style="bold white"))
     else:
-        header.append(f"\n{event['title']}\n", style="bold white")
+        header.append(event['title'], style="bold white")
+    header.append("\n")
     if event.get('subtitle'):
         header.append(f"{event['subtitle']}\n", style="dim")
 
