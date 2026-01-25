@@ -544,16 +544,11 @@ def create_events_table(events: List[Dict[str, Any]], title: str, console: Conso
         if not title_str:
             title_str = "[No Title]"
 
-        # Create clickable hyperlink for the event title
         event_ticker = event.get('event_ticker', '')
-        if event_ticker:
-            title_link = f"[link=https://kalshi.com/markets/{event_ticker}]{title_str}[/link]"
-        else:
-            title_link = title_str
 
         events_table.add_row(
             str(i),
-            title_link,
+            title_str,
             event_ticker,
             event.get('category', 'Unknown')[:10],
             format_age(event.get('created_time', datetime.min.replace(tzinfo=None))),
