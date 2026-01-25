@@ -311,7 +311,10 @@ def display_with_rich(results: Dict[str, Any]):
     header = Text()
     header.append("MUTUALLY EXCLUSIVE EVENT SCANNER\n", style="bold cyan")
     header.append(f"\nScanned: {meta['total_events_scanned']} events\n", style="dim")
-    header.append(f"Found: {meta['me_events_found']} ME events matching criteria\n", style="bold green")
+    if 'limited_to' in meta:
+        header.append(f"Showing: {meta['limited_to']} of {meta['total_matching']} matching ME events\n", style="bold green")
+    else:
+        header.append(f"Found: {meta['me_events_found']} ME events matching criteria\n", style="bold green")
 
     filters = meta['filters']
     filter_str = f"Price range: {filters['min_price']}-{filters['max_price']}¢"
@@ -395,7 +398,10 @@ def display_plain(results: Dict[str, Any]):
     print("MUTUALLY EXCLUSIVE EVENT SCANNER")
     print("=" * 80)
     print(f"Scanned: {meta['total_events_scanned']} events")
-    print(f"Found: {meta['me_events_found']} ME events matching criteria")
+    if 'limited_to' in meta:
+        print(f"Showing: {meta['limited_to']} of {meta['total_matching']} matching ME events")
+    else:
+        print(f"Found: {meta['me_events_found']} ME events matching criteria")
     print(f"Filters: {meta['filters']}")
     print(f"Sort: {meta['sort_by']}")
     print()
@@ -447,6 +453,8 @@ Examples:
   python me_scanner.py --min-price 80 --max-price 97   # Certainty gap candidates
   python me_scanner.py --sort arb                       # Biggest arb opportunities
   python me_scanner.py --category Economics             # Economics only
+  python me_scanner.py --limit 50                       # Show top 50 results
+  python me_scanner.py --limit 0                        # Show all results
         '''
     )
     parser.add_argument(
@@ -479,6 +487,12 @@ Examples:
         help='Sort order: price (highest in-range), volume, arb (biggest deviation), closing (soonest) (default: price)'
     )
     parser.add_argument(
+        '--limit',
+        type=int,
+        default=25,
+        help='Maximum number of results to display (default: 25, use 0 for unlimited)'
+    )
+    parser.add_argument(
         '--output-format',
         choices=['json', 'csv', 'console'],
         default='console',
@@ -502,6 +516,14 @@ Examples:
             category_filter=args.category,
             sort_by=args.sort
         )
+
+        # Apply limit
+        if args.limit > 0 and len(results['events']) > args.limit:
+            total_found = len(results['events'])
+            results['events'] = results['events'][:args.limit]
+            results['metadata']['limited_to'] = args.limit
+            results['metadata']['total_matching'] = total_found
+            print(f"Showing top {args.limit} of {total_found} results (use --limit 0 for all)", file=sys.stderr)
 
         if args.output_format == 'json':
             output = json.dumps(results, indent=2, default=str)
