@@ -186,7 +186,7 @@ NEXT STEPS:
 import argparse
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
@@ -435,7 +435,7 @@ class KalshiSnapshot:
 
         return {
             'metadata': {
-                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'timestamp': datetime.now(timezone.utc).isoformat(),
                 'total_series': len(series),
                 'total_events': len(events),
                 'events_after_filter': sum(len(v) for v in events_by_category.values()),
@@ -475,8 +475,8 @@ def format_close_date(close_dt: datetime) -> str:
     """Format close datetime as readable string."""
     if close_dt == datetime.max.replace(tzinfo=None):
         return "Unknown"
-    now = datetime.utcnow()
-    delta = close_dt.replace(tzinfo=None) - now
+    now = datetime.now(timezone.utc)
+    delta = close_dt.replace(tzinfo=None) - now.replace(tzinfo=None)
 
     if delta.days < 0:
         return "Closed"
@@ -497,8 +497,8 @@ def format_age(created_dt: datetime) -> str:
     """Format event age (time since creation) as readable string."""
     if created_dt == datetime.min.replace(tzinfo=None):
         return "Unknown"
-    now = datetime.utcnow()
-    delta = now - created_dt.replace(tzinfo=None)
+    now = datetime.now(timezone.utc)
+    delta = now.replace(tzinfo=None) - created_dt.replace(tzinfo=None)
 
     if delta.days == 0:
         hours = delta.seconds // 3600
@@ -520,9 +520,10 @@ def format_age(created_dt: datetime) -> str:
 
 def create_events_table(events: List[Dict[str, Any]], title: str, console: Console, limit: Optional[int] = None):
     """Helper to create events table with standardized columns."""
-    events_table = Table(box=box.ROUNDED, show_header=True, header_style="bold magenta")
+    events_table = Table(box=box.ROUNDED, show_header=True, header_style="bold magenta", expand=True)
     events_table.add_column("#", justify="right", style="dim", width=3)
     events_table.add_column("Event", style="white", width=33, no_wrap=False)
+    events_table.add_column("Event Ticker", style="yellow", width=14)
     events_table.add_column("Category", style="cyan", width=10)
     events_table.add_column("Age", style="dim", width=4)
     events_table.add_column("Close", style="blue", width=5)
@@ -539,13 +540,21 @@ def create_events_table(events: List[Dict[str, Any]], title: str, console: Conso
         if title_str and len(title_str) > 40:
             title_str = title_str[:37] + "..."
 
-        # Debug: ensure we have a title
+        # Ensure we have a title
         if not title_str:
             title_str = "[No Title]"
 
+        # Create clickable hyperlink for the event title
+        event_ticker = event.get('event_ticker', '')
+        if event_ticker:
+            title_link = f"[link=https://kalshi.com/markets/{event_ticker}]{title_str}[/link]"
+        else:
+            title_link = title_str
+
         events_table.add_row(
             str(i),
-            title_str,
+            title_link,
+            event_ticker,
             event.get('category', 'Unknown')[:10],
             format_age(event.get('created_time', datetime.min.replace(tzinfo=None))),
             format_close_date(event.get('closest_close_time', datetime.max.replace(tzinfo=None))),
@@ -588,7 +597,7 @@ def display_with_rich(snapshot: Dict[str, Any], top_n: int = 25):
     # Category Statistics Table (unless filtering by category)
     if not meta.get('category_filter'):
         console.print("\n[bold cyan]CATEGORY STATISTICS[/bold cyan]\n")
-        cat_table = Table(box=box.ROUNDED, show_header=True, header_style="bold magenta")
+        cat_table = Table(box=box.ROUNDED, show_header=True, header_style="bold magenta", expand=True)
         cat_table.add_column("Category", style="cyan", no_wrap=True)
         cat_table.add_column("Events", justify="right", style="green")
         cat_table.add_column("Total Volume", justify="right", style="yellow")
@@ -646,7 +655,7 @@ def display_with_rich(snapshot: Dict[str, Any], top_n: int = 25):
     # Top Series Table (only if not category filtering)
     if not meta.get('category_filter'):
         console.print(f"\n[bold cyan]TOP {top_n} SERIES BY VOLUME[/bold cyan]\n")
-        series_table = Table(box=box.ROUNDED, show_header=True, header_style="bold magenta")
+        series_table = Table(box=box.ROUNDED, show_header=True, header_style="bold magenta", expand=True)
         series_table.add_column("#", justify="right", style="dim", width=3)
         series_table.add_column("Series", style="white", max_width=45)
         series_table.add_column("Category", style="cyan", no_wrap=True)
@@ -834,7 +843,7 @@ def main():
 
         # Generate output
         if args.output_format == 'json':
-            output = json.dumps(snapshot, indent=2)
+            output = json.dumps(snapshot, indent=2, default=str)
         elif args.output_format == 'csv':
             output = format_csv(snapshot)
         else:  # console
