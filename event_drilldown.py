@@ -132,7 +132,7 @@ NEXT STEPS AFTER DRILL-DOWN:
 import argparse
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
@@ -339,7 +339,7 @@ class KalshiEventDrilldown:
                 'sort_by': sort_by
             },
             'arbitrage_analysis': arb_analysis,
-            'timestamp': datetime.utcnow().isoformat() + 'Z'
+            'timestamp': datetime.now(timezone.utc).isoformat()
         }
 
 
@@ -366,8 +366,8 @@ def format_close_time(close_dt: Optional[datetime]) -> str:
     if not close_dt:
         return "Unknown"
 
-    now = datetime.utcnow()
-    delta = close_dt.replace(tzinfo=None) - now
+    now = datetime.now(timezone.utc)
+    delta = close_dt.replace(tzinfo=None) - now.replace(tzinfo=None)
 
     if delta.days < 0:
         return "Closed"
@@ -398,7 +398,12 @@ def display_with_rich(analysis: Dict[str, Any]):
     # Header panel with event info
     header = Text()
     header.append("EVENT DRILL-DOWN\n", style="bold cyan")
-    header.append(f"\n{event['title']}\n", style="bold white")
+    # Create clickable hyperlink for the event title
+    event_ticker = event['ticker']
+    if event_ticker:
+        header.append(f"\n[link=https://kalshi.com/markets/{event_ticker}]{event['title']}[/link]\n", style="bold white")
+    else:
+        header.append(f"\n{event['title']}\n", style="bold white")
     if event.get('subtitle'):
         header.append(f"{event['subtitle']}\n", style="dim")
 
@@ -422,7 +427,7 @@ def display_with_rich(analysis: Dict[str, Any]):
 
     # Summary stats
     console.print("\n[bold cyan]EVENT SUMMARY[/bold cyan]")
-    stats_table = Table(box=box.SIMPLE, show_header=False)
+    stats_table = Table(box=box.SIMPLE, show_header=False, expand=True)
     stats_table.add_column("Metric", style="bold")
     stats_table.add_column("Value", style="yellow")
 
@@ -450,7 +455,7 @@ def display_with_rich(analysis: Dict[str, Any]):
     # Markets table - compact design for typical terminal widths (~80-100 chars)
     console.print(f"\n[bold cyan]ALL MARKETS (sorted by {summary['sort_by']})[/bold cyan]\n")
 
-    markets_table = Table(box=box.ROUNDED, show_header=True, header_style="bold magenta")
+    markets_table = Table(box=box.ROUNDED, show_header=True, header_style="bold magenta", expand=True)
     markets_table.add_column("#", justify="right", style="dim", width=2)
     markets_table.add_column("Outcome", style="white", width=22, no_wrap=True, overflow="ellipsis")
     markets_table.add_column("YES", justify="right", style="green", width=4)
@@ -619,13 +624,7 @@ Examples:
 
         # Generate output
         if args.output_format == 'json':
-            # Custom JSON encoder for datetime
-            def json_serializer(obj):
-                if isinstance(obj, datetime):
-                    return obj.isoformat()
-                raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
-
-            output = json.dumps(analysis, indent=2, default=json_serializer)
+            output = json.dumps(analysis, indent=2, default=str)
         elif args.output_format == 'csv':
             output = format_csv(analysis)
         else:  # console
