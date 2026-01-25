@@ -489,8 +489,8 @@ Examples:
     parser.add_argument(
         '--limit',
         type=int,
-        default=25,
-        help='Maximum number of results to display (default: 25, use 0 for unlimited)'
+        default=50,
+        help='Maximum results for console output (default: 50, use 0 for unlimited). Does not affect CSV/JSON exports.'
     )
     parser.add_argument(
         '--output-format',
@@ -517,19 +517,19 @@ Examples:
             sort_by=args.sort
         )
 
-        # Apply limit
-        if args.limit > 0 and len(results['events']) > args.limit:
-            total_found = len(results['events'])
-            results['events'] = results['events'][:args.limit]
-            results['metadata']['limited_to'] = args.limit
-            results['metadata']['total_matching'] = total_found
-            print(f"Showing top {args.limit} of {total_found} results (use --limit 0 for all)", file=sys.stderr)
-
         if args.output_format == 'json':
             output = json.dumps(results, indent=2, default=str)
         elif args.output_format == 'csv':
             output = format_csv(results)
         else:
+            # Apply limit only for console output
+            if args.limit > 0 and len(results['events']) > args.limit:
+                total_found = len(results['events'])
+                results['events'] = results['events'][:args.limit]
+                results['metadata']['limited_to'] = args.limit
+                results['metadata']['total_matching'] = total_found
+                print(f"Showing top {args.limit} of {total_found} results (use --limit 0 for all)", file=sys.stderr)
+
             if args.output_file:
                 import io
                 buf = io.StringIO()
