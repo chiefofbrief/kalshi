@@ -344,35 +344,57 @@ class KalshiSnapshot:
             if prices:
                 event['price_min'] = min(prices)
                 event['price_max'] = max(prices)
+                # Calculate sum for ME events
+                if event.get('mutually_exclusive', False):
+                    event['sum_yes_cents'] = sum(prices)
+                else:
+                    event['sum_yes_cents'] = None
             else:
                 event['price_min'] = 0
                 event['price_max'] = 0
+                event['sum_yes_cents'] = None
 
             # Get close time for sorting
             close_times = []
+            future_close_times = []
+            now = datetime.now(timezone.utc)
+            
             for m in markets:
                 close_time_str = m.get('close_time')
                 if close_time_str:
                     try:
-                        close_dt = datetime.fromisoformat(close_time_str.replace('Z', '+00:00'))
+                        # Clean string and convert to datetime
+                        ct_clean = close_time_str.replace('Z', '+00:00')
+                        close_dt = datetime.fromisoformat(ct_clean)
                         close_times.append(close_dt)
+                        
+                        # Only track future close times for actionable discovery
+                        if close_dt > now:
+                            future_close_times.append(close_dt)
                     except (ValueError, TypeError):
                         continue
 
-            if close_times:
+            # Event is truly tradeable if it has at least one future market
+            if future_close_times:
+                event['closest_close_time'] = min(future_close_times)
+                event['is_actionable'] = True
+            elif close_times:
+                # All markets are in the past
                 event['closest_close_time'] = min(close_times)
+                event['is_actionable'] = False
             else:
-                event['closest_close_time'] = datetime.max.replace(tzinfo=None)
+                event['closest_close_time'] = datetime.max.replace(tzinfo=timezone.utc)
+                event['is_actionable'] = False
 
-            # Get creation time for sorting
+            # Get creation time for sorting - Fix parsing for older ISO formats
             created_time_str = markets[0].get('created_time') if markets else None
             if created_time_str:
                 try:
                     event['created_time'] = datetime.fromisoformat(created_time_str.replace('Z', '+00:00'))
                 except (ValueError, TypeError):
-                    event['created_time'] = datetime.min.replace(tzinfo=None)
+                    event['created_time'] = datetime.min.replace(tzinfo=timezone.utc)
             else:
-                event['created_time'] = datetime.min.replace(tzinfo=None)
+                event['created_time'] = datetime.min.replace(tzinfo=timezone.utc)
 
         # Group and sort series by category
         series_by_category = {}
@@ -390,6 +412,9 @@ class KalshiSnapshot:
 
         for event in events:
             # Apply filters
+            if not event.get('is_actionable', False):
+                continue
+            
             if event['calculated_volume'] < min_volume:
                 continue
 
@@ -431,6 +456,55 @@ class KalshiSnapshot:
                 'avg_volume': total_cat_volume / len(events_list) if events_list else 0
             }
 
+        # Identify signals across 5 strategies (ONLY for the 7 core categories)
+        signals = {
+            'closing_urgency': [],
+            'certainty_gaps': [],
+            'arbitrage': [],
+            'momentum': [],
+            'fresh_alpha': []
+        }
+        
+        now = datetime.now(timezone.utc)
+        core_categories = ['Economics', 'Financials', 'Companies', 'Politics', 'Elections', 'Science and Technology', 'Crypto']
+        all_filtered_events = []
+        for cat in core_categories:
+            if cat in events_by_category:
+                all_filtered_events.extend(events_by_category[cat])
+            
+        for e in all_filtered_events:
+            # 1. Closing Urgency (< 48h, high volume relative to category)
+            delta = e['closest_close_time'] - now
+            if delta.total_seconds() > 0 and delta.days < 2 and e['calculated_volume'] > 10000:
+                signals['closing_urgency'].append(e)
+                
+            # 2. Certainty Gaps (85-97c)
+            if 85 <= e['price_max'] <= 97 and e['calculated_volume'] > 20000:
+                signals['certainty_gaps'].append(e)
+                
+            # 3. Arbitrage (ME deviation > 3c)
+            if e.get('sum_yes_cents') and abs(e['sum_yes_cents'] - 100) >= 3:
+                signals['arbitrage'].append(e)
+                
+            # 4. Momentum (Top 24h volume) - we'll sort after
+            if e['calculated_volume_24h'] > 5000:
+                signals['momentum'].append(e)
+                
+            # 5. Fresh Alpha (New in last 48h)
+            created_delta = now - e['created_time']
+            if created_delta.days < 2 and created_delta.days >= 0:
+                signals['fresh_alpha'].append(e)
+
+        # Sort and limit signals
+        signals['closing_urgency'].sort(key=lambda x: x['closest_close_time'])
+        signals['certainty_gaps'].sort(key=lambda x: x['price_max'], reverse=True)
+        signals['arbitrage'].sort(key=lambda x: abs(x['sum_yes_cents'] - 100), reverse=True)
+        signals['momentum'].sort(key=lambda x: x['calculated_volume_24h'], reverse=True)
+        signals['fresh_alpha'].sort(key=lambda x: x['created_time'], reverse=True)
+
+        for key in signals:
+            signals[key] = signals[key][:10]
+
         print(f"✓ Analysis complete: {filtered_count} events after filters", file=sys.stderr)
 
         return {
@@ -449,7 +523,8 @@ class KalshiSnapshot:
             },
             'series_by_category': series_by_category,
             'events_by_category': events_by_category,
-            'category_statistics': category_stats
+            'category_statistics': category_stats,
+            'signals': signals
         }
 
 
@@ -473,15 +548,19 @@ def format_price_range(min_cents: int, max_cents: int) -> str:
 
 def format_close_date(close_dt: datetime) -> str:
     """Format close datetime as readable string."""
-    if close_dt == datetime.max.replace(tzinfo=None):
+    if close_dt.year >= 9999:
         return "Unknown"
     now = datetime.now(timezone.utc)
-    delta = close_dt.replace(tzinfo=None) - now.replace(tzinfo=None)
+    # Ensure both are timezone aware for comparison
+    if close_dt.tzinfo is None:
+        close_dt = close_dt.replace(tzinfo=timezone.utc)
+        
+    delta = close_dt - now
 
-    if delta.days < 0:
+    if delta.total_seconds() < 0:
         return "Closed"
     elif delta.days == 0:
-        hours = delta.seconds // 3600
+        hours = int(delta.total_seconds() // 3600)
         return f"{hours}h"
     elif delta.days < 7:
         return f"{delta.days}d"
@@ -495,10 +574,14 @@ def format_close_date(close_dt: datetime) -> str:
 
 def format_age(created_dt: datetime) -> str:
     """Format event age (time since creation) as readable string."""
-    if created_dt == datetime.min.replace(tzinfo=None):
-        return "Unknown"
+    if created_dt.year <= 1:
+        return "N/A"
     now = datetime.now(timezone.utc)
-    delta = now.replace(tzinfo=None) - created_dt.replace(tzinfo=None)
+    # Ensure both are timezone aware for comparison
+    if created_dt.tzinfo is None:
+        created_dt = created_dt.replace(tzinfo=timezone.utc)
+        
+    delta = now - created_dt
 
     if delta.days == 0:
         hours = delta.seconds // 3600
@@ -611,10 +694,16 @@ def display_with_rich(snapshot: Dict[str, Any], top_n: int = 25):
 
         console.print(cat_table)
 
+    # Main events table
+    priority_categories = ['Economics', 'Financials', 'Companies', 'Politics', 'Elections', 'Science and Technology', 'Crypto']
+    
+    # Filter to only the core 7 categories
+    filtered_events_by_cat = {cat: snapshot['events_by_category'].get(cat, []) for cat in priority_categories}
+    
     # Gather all events in sorted order
     all_events = []
-    for events_list in snapshot['events_by_category'].values():
-        all_events.extend(events_list)
+    for cat in priority_categories:
+        all_events.extend(filtered_events_by_cat[cat])
 
     # Re-sort all events by the chosen sort method (they're already sorted within categories)
     sort_key_map = {
@@ -762,6 +851,108 @@ def format_csv(snapshot: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def format_markdown(snapshot: Dict[str, Any], top_n: int = 25) -> str:
+    """Format snapshot as a vertical Markdown document for readability."""
+    meta = snapshot['metadata']
+    lines = []
+    
+    lines.append(f"# Kalshi Platform Snapshot")
+    lines.append(f"**Timestamp:** {meta['timestamp']}")
+    lines.append(f"**Platform:** {meta['total_series']:,} series, {meta['total_events']:,} events, {format_number(meta['total_volume'])} contracts")
+    lines.append(f"**Filters:** Volume ≥ {meta['min_volume_filter']:,}, Price {meta['min_price_filter']}-{meta['max_price_filter']}¢")
+    lines.append(f"**Sort:** {meta['sort_by']}")
+    lines.append("")
+
+    # --- TOP TRADING SIGNALS SECTION ---
+    lines.append("## 🚀 TOP TRADING SIGNALS")
+    
+    signals = snapshot.get('signals', {})
+    
+    # 1. Arbitrage
+    if signals.get('arbitrage'):
+        lines.append("### ⚖️ Arbitrage Opportunities (ME Logic)")
+        for i, e in enumerate(signals['arbitrage'][:5], 1):
+            dev = e['sum_yes_cents'] - 100
+            dev_str = f"+{dev}¢ (SELL)" if dev > 0 else f"{dev}¢ (BUY)"
+            url = f"https://kalshi.com/markets/{e['event_ticker']}"
+            lines.append(f"{i}. **[{e['title']}]({url})**")
+            lines.append(f"   - **Arb Deviation:** `{dev_str}` | **Sum:** `${e['sum_yes_cents']/100:.2f}`")
+            lines.append(f"   - **Volume:** `{format_number(e['calculated_volume'])}` | **Ticker:** `{e['event_ticker']}`")
+        lines.append("")
+
+    # 2. Closing Urgency
+    if signals.get('closing_urgency'):
+        lines.append("### 🔴 Closing Soon (Temporal Urgency)")
+        for i, e in enumerate(signals['closing_urgency'][:5], 1):
+            url = f"https://kalshi.com/markets/{e['event_ticker']}"
+            lines.append(f"{i}. **[{e['title']}]({url})**")
+            lines.append(f"   - **Closes in:** `{format_close_date(e['closest_close_time'])}` | **Volume:** `{format_number(e['calculated_volume'])}`")
+            lines.append(f"   - **Price Range:** `{format_price_range(e['price_min'], e['price_max'])}`")
+        lines.append("")
+
+    # 3. Certainty Gaps
+    if signals.get('certainty_gaps'):
+        lines.append("### 🎯 Certainty Gaps (85-97¢)")
+        for i, e in enumerate(signals['certainty_gaps'][:5], 1):
+            url = f"https://kalshi.com/markets/{e['event_ticker']}"
+            lines.append(f"{i}. **[{e['title']}]({url})**")
+            lines.append(f"   - **Top Market:** `{e['price_max']}¢` | **Volume:** `{format_number(e['calculated_volume'])}`")
+            lines.append(f"   - **Closes in:** `{format_close_date(e['closest_close_time'])}`")
+        lines.append("")
+
+    # 4. Momentum
+    if signals.get('momentum'):
+        lines.append("### 📈 Momentum (24h Volume)")
+        for i, e in enumerate(signals['momentum'][:5], 1):
+            url = f"https://kalshi.com/markets/{e['event_ticker']}"
+            lines.append(f"{i}. **[{e['title']}]({url})**")
+            lines.append(f"   - **24h Vol:** `{format_number(e['calculated_volume_24h'])}` | **Price:** `{e['price_max']}¢`")
+        lines.append("")
+        
+    lines.append("---")
+    lines.append("")
+
+    # Summary Table
+    lines.append("## Category Summary")
+    lines.append("| Category | Events | Volume | Avg/Event |")
+    lines.append("| :--- | :---: | :---: | :---: |")
+    
+    core_categories = ['Economics', 'Financials', 'Companies', 'Politics', 'Elections', 'Science and Technology', 'Crypto']
+    stats = snapshot['category_statistics']
+    
+    for category in core_categories:
+        if category in stats:
+            cat_stats = stats[category]
+            lines.append(f"| {category} | {cat_stats['event_count']:,} | {format_number(cat_stats['total_volume'])} | {format_number(int(cat_stats['avg_volume']))} |")
+    lines.append("")
+
+    # Events by Category
+    lines.append("## Detailed Events")
+    
+    core_categories = ['Economics', 'Financials', 'Companies', 'Politics', 'Elections', 'Science and Technology', 'Crypto']
+    
+    for category in core_categories:
+        events = snapshot['events_by_category'].get(category, [])
+        if not events:
+            continue
+            
+        lines.append(f"### {category}")
+        for i, event in enumerate(events[:top_n] if not meta.get('category_filter') else events, 1):
+            created_dt = event.get('created_time', datetime.min.replace(tzinfo=None))
+            close_dt = event.get('closest_close_time', datetime.max.replace(tzinfo=None))
+            ticker = event.get('event_ticker', 'N/A')
+            url = f"https://kalshi.com/markets/{ticker}"
+            
+            lines.append(f"#### {i}. [{event.get('title', 'Unknown')}]({url}) (`{ticker}`)")
+            lines.append(f"- **Price Range:** `{format_price_range(event['price_min'], event['price_max'])}`")
+            lines.append(f"- **Timing:** Age: `{format_age(created_dt)}` | Closes in: `{format_close_date(close_dt)}`")
+            lines.append(f"- **Liquidity:** Volume: `{format_number(event['calculated_volume'])}` (24h: `{format_number(event['calculated_volume_24h'])}`) | Open Interest: `{format_number(event['calculated_open_interest'])}`")
+            lines.append(f"- **Structure:** {len(event.get('markets', []))} individual markets")
+            lines.append("")
+            
+    return "\n".join(lines)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Fetch and analyze Kalshi platform snapshot',
@@ -770,9 +961,9 @@ def main():
     )
     parser.add_argument(
         '--output-format',
-        choices=['json', 'csv', 'console'],
-        default='console',
-        help='Output format (default: console)'
+        choices=['json', 'csv', 'console', 'md'],
+        default='md',
+        help='Output format (default: md)'
     )
     parser.add_argument(
         '--min-volume',
@@ -809,9 +1000,13 @@ def main():
         default='open',
         help='Event status filter (default: open)'
     )
+    # Generate default timestamped filename
+    default_filename = f"snapshot_{datetime.now().strftime('%Y_%m_%d_%H%M%S')}.md"
+    
     parser.add_argument(
         '--output-file', '-o',
-        help='Output file path (default: stdout)'
+        default=default_filename,
+        help=f'Output file path (default: {default_filename})'
     )
     parser.add_argument(
         '--top-n',
@@ -841,25 +1036,17 @@ def main():
             output = json.dumps(snapshot, indent=2, default=str)
         elif args.output_format == 'csv':
             output = format_csv(snapshot)
+        elif args.output_format == 'md':
+            output = format_markdown(snapshot, args.top_n)
         else:  # console
-            if args.output_file:
-                # If saving to file, use plain text
-                import io
-                buf = io.StringIO()
-                old_stdout = sys.stdout
-                sys.stdout = buf
-                display_plain(snapshot, args.top_n)
-                sys.stdout = old_stdout
-                output = buf.getvalue()
+            # Display to terminal with rich if available
+            if RICH_AVAILABLE:
+                display_with_rich(snapshot, args.top_n)
             else:
-                # Display to terminal with rich if available
-                if RICH_AVAILABLE:
-                    display_with_rich(snapshot, args.top_n)
-                else:
-                    display_plain(snapshot, args.top_n)
-                return 0
+                display_plain(snapshot, args.top_n)
+            return 0
 
-        # Write output if file specified
+        # Write output if file specified or if md/json/csv format chosen
         if args.output_file:
             with open(args.output_file, 'w') as f:
                 f.write(output)
