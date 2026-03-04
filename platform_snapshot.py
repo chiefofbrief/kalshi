@@ -895,28 +895,30 @@ def format_markdown(snapshot: Dict[str, Any], top_n: int = 25) -> str:
     
     # 1. Arbitrage
     if signals.get('arbitrage'):
-        lines.append("### ⚖️ Arbitrage Opportunities (Order Book Math)")
-        for i, e in enumerate(signals['arbitrage'][:10], 1):
-            url = f"https://kalshi.com/event/{e['event_ticker']}"
-            bid_sum = e.get('sum_yes_bid', 0)
-            ask_sum = e.get('sum_yes_ask', 0)
-            last_sum = e.get('sum_yes_cents', 0)
-            
-            status = "Historical"
-            if bid_sum > 100: status = "🔥 SELL ARB"
-            elif ask_sum < 100 and ask_sum > 0: status = "🔥 BUY ARB"
-            
-            lines.append(f"{i}. **[{e['title']}]({url})** — `{status}`")
-            lines.append(f"   - **Order Book:** Bids: `${bid_sum/100:.2f}` | Asks: `${ask_sum/100:.2f}` | Last: `${last_sum/100:.2f}`")
-            lines.append(f"   - **Outcomes:** {', '.join(e.get('outcomes', [])[:6])}{'...' if len(e.get('outcomes', [])) > 6 else ''}")
-            lines.append(f"   - **Liquidity:** Vol: `{format_number(e['calculated_volume'])}` | Ticker: `{e['event_ticker']}`")
-        lines.append("")
+        # Only show real SELL arbs (Bids > 100) - mathematically guaranteed profit
+        real_arbs = [e for e in signals['arbitrage'] if e.get('sum_yes_bid', 0) > 100]
+        
+        if real_arbs:
+            lines.append("### ⚖️ Arbitrage Opportunities (Guaranteed SELL Arb)")
+            for i, e in enumerate(real_arbs[:10], 1):
+                # Use series_ticker for robust landing page link
+                ticker = e.get('series_ticker') or e.get('event_ticker')
+                # Kalshi series pages usually use the prefix (e.g., KXWTIW)
+                url = f"https://kalshi.com/markets/{ticker.split('-')[0].lower()}"
+                bid_sum = e.get('sum_yes_bid', 0)
+                
+                lines.append(f"{i}. **[{e['title']}]({url})** — `🔥 SELL ARB`")
+                lines.append(f"   - **Order Book:** YES Bids Sum: `${bid_sum/100:.2f}`")
+                lines.append(f"   - **The Play:** Sell the set (buy NO on all outcomes). Cost is < guaranteed payout.")
+                lines.append(f"   - **Liquidity:** Vol: `{format_number(e['calculated_volume'])}` | Ticker: `{e['event_ticker']}`")
+            lines.append("")
 
     # 2. Closing Urgency
     if signals.get('closing_urgency'):
         lines.append("### 🔴 Closing Soon (Temporal Urgency)")
         for i, e in enumerate(signals['closing_urgency'][:5], 1):
-            url = f"https://kalshi.com/event/{e['event_ticker']}"
+            ticker = e.get('series_ticker') or e.get('event_ticker')
+            url = f"https://kalshi.com/markets/{ticker.split('-')[0].lower()}"
             lines.append(f"{i}. **[{e['title']}]({url})**")
             lines.append(f"   - **Closes in:** `{format_close_date(e['closest_close_time'])}` | **Volume:** `{format_number(e['calculated_volume'])}`")
             lines.append(f"   - **Price Range:** `{format_price_range(e['price_min'], e['price_max'])}`")
@@ -926,7 +928,8 @@ def format_markdown(snapshot: Dict[str, Any], top_n: int = 25) -> str:
     if signals.get('certainty_gaps'):
         lines.append("### 🎯 Certainty Gaps (85-97¢)")
         for i, e in enumerate(signals['certainty_gaps'], 1):
-            url = f"https://kalshi.com/event/{e['event_ticker']}"
+            ticker = e.get('series_ticker') or e.get('event_ticker')
+            url = f"https://kalshi.com/markets/{ticker.split('-')[0].lower()}"
             lines.append(f"{i}. **[{e['title']}]({url})**")
             lines.append(f"   - **Top Market:** `{e['price_max']}¢` | **Volume:** `{format_number(e['calculated_volume'])}`")
             lines.append(f"   - **Closes in:** `{format_close_date(e['closest_close_time'])}` | **Ticker:** `{e['event_ticker']}`")
@@ -936,7 +939,8 @@ def format_markdown(snapshot: Dict[str, Any], top_n: int = 25) -> str:
     if signals.get('momentum'):
         lines.append("### 📈 Momentum (24h Volume)")
         for i, e in enumerate(signals['momentum'][:5], 1):
-            url = f"https://kalshi.com/event/{e['event_ticker']}"
+            ticker = e.get('series_ticker') or e.get('event_ticker')
+            url = f"https://kalshi.com/markets/{ticker.split('-')[0].lower()}"
             lines.append(f"{i}. **[{e['title']}]({url})**")
             lines.append(f"   - **24h Vol:** `{format_number(e['calculated_volume_24h'])}` | **Price:** `{e['price_max']}¢`")
         lines.append("")
@@ -972,10 +976,10 @@ def format_markdown(snapshot: Dict[str, Any], top_n: int = 25) -> str:
         for i, event in enumerate(events[:top_n] if not meta.get('category_filter') else events, 1):
             created_dt = event.get('created_time', datetime.min.replace(tzinfo=None))
             close_dt = event.get('closest_close_time', datetime.max.replace(tzinfo=None))
-            ticker = event.get('event_ticker', 'N/A')
-            url = f"https://kalshi.com/event/{ticker}"
+            ticker = event.get('series_ticker') or event.get('event_ticker', 'N/A')
+            url = f"https://kalshi.com/markets/{ticker.split('-')[0].lower()}"
             
-            lines.append(f"#### {i}. [{event.get('title', 'Unknown')}]({url}) (`{ticker}`)")
+            lines.append(f"#### {i}. [{event.get('title', 'Unknown')}]({url}) (`{event.get('event_ticker', 'N/A')}`)")
             lines.append(f"- **Price Range:** `{format_price_range(event['price_min'], event['price_max'])}`")
             lines.append(f"- **Timing:** Age: `{format_age(created_dt)}` | Closes in: `{format_close_date(close_dt)}`")
             lines.append(f"- **Liquidity:** Volume: `{format_number(event['calculated_volume'])}` (24h: `{format_number(event['calculated_volume_24h'])}`) | Open Interest: `{format_number(event['calculated_open_interest'])}`")

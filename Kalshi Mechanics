@@ -1,0 +1,557 @@
+KALSHI PLATFORM MECHANICS & REFERENCE
+
+### Order Types - Technical Details
+
+**Quick Order (Market Order)**
+- Executes immediately at best available price
+- Can span multiple price levels if quantity exceeds availability at best price
+- Platform automatically calculates and displays average fill price
+- How to place: Select strike → Choose Yes/No → Enter dollar value OR number of contracts → Execute
+
+**Limit Order**
+- Specify maximum price willing to pay (for buys) or minimum price willing to accept (for sells)
+- Only executes at specified price or better
+- May remain unfilled if market never reaches specified price
+- Allows partial fills
+- How to place: Enter quantity → Set limit price → Order executes automatically when contracts available at or below your price
+
+---
+
+### Fee Structure - Formulas & Tables
+
+**Standard Trading Fee Formula:**
+```
+fees = round up(0.07 × C × P × (1-P))
+```
+Where:
+- C = number of contracts
+- P = price of contract in dollars (e.g., 50¢ = 0.5)
+- Round up = rounds to nearest cent per contract
+
+**Maker Fee Formula (some markets only):**
+```
+fees = round up(0.0175 × C × P × (1-P))
+```
+- 25% of standard taker fee
+- Only charged when trade executes, not when canceled
+- Check https://kalshi.com/fee-schedule for which markets have maker fees
+
+**S&P500 and NASDAQ-100 Fee Formula:**
+```
+fees = round up(0.035 × C × P × (1-P))
+```
+- 50% of standard rate
+- Applies to all markets with ticker beginning with INX or NASDAQ100
+
+**Fee Table (100 contracts, standard rate):**
+- $0.05: $0.34
+- $0.10: $0.63
+- $0.20: $1.12
+- $0.30: $1.47
+- $0.40: $1.68
+- $0.50: $1.75 (highest)
+- $0.60: $1.68
+- $0.70: $1.47
+- $0.80: $1.12
+- $0.90: $0.63
+- $0.95: $0.34
+
+**Other Fees:**
+- Settlement: $0
+- Membership: $0
+- ACH deposits: $0
+- ACH withdrawals: $0
+- Wire deposits: $0 (Kalshi fee; bank fees may apply)
+- Wire withdrawals: Not supported under $500,000
+- Debit deposits: 2%
+- Debit withdrawals: $2
+- Crypto: Third-party processor fees (disclosed before transaction)
+
+**Fee Charging Rules:**
+- Taker orders (immediately matched): Charged fees
+- Maker orders (rest on orderbook): Not charged fees (except in designated maker fee markets)
+
+---
+
+### Selling Positions - Mechanics
+
+- Available anytime before market expiration
+- Quick Order: Sells immediately at best available price
+- Limit Order: Sells at specified price or higher
+- Platform displays: Current position size, estimated payout before execution
+- Selling works identically to buying, just in reverse direction
+
+---
+
+### Yes vs No Mechanics
+
+**Fundamental Rule:**
+- At settlement: Yes payout + No payout = $1.00 (exactly one side pays $1.00, other pays $0)
+- Backend treats these as equivalent positions
+
+**Technical Equivalence:**
+- Buying Yes = Selling No (both profit if event occurs)
+- Buying No = Selling Yes (both profit if event doesn't occur)
+
+**Example:**
+- If Yes trades at 65¢, No must trade at 35¢
+- Buying Yes at 65¢ gives same profit profile as selling No at 35¢
+
+**Note on Displayed Prices:**
+- Displayed prices are ask prices (offers to sell)
+- Yes ask + No ask typically exceeds $1.00 due to bid-ask spread
+- This is normal market friction, not a violation of settlement math
+
+---
+
+### Collateral Return - Technical Details
+
+**Opt-in Feature:**
+- Disabled by default for new users
+- Enable in account settings
+- Only applies to future positions after enabling
+- Current positions unaffected by toggling setting
+
+**Eligibility Determination:**
+- Determined at event level
+- Cannot be changed once resting order or trade placed
+- Only applies to mutually exclusive markets
+
+**How Calculation Works:**
+
+*Mutually Exclusive Markets:*
+- Only one outcome can occur across all options
+- Kalshi calculates: Total spent - Guaranteed minimum payout = Max loss
+- Locks only max loss amount, returns guaranteed payout immediately
+- Example: Buy No on strike A (60¢) + No on strike B (70¢) = $1.30 spent, $1.00 guaranteed return, $0.30 locked
+
+*Multi-Strike Range Markets:*
+- Same calculation applies when strikes are mutually exclusive
+- Example: Buy No "6,800-6,999" (74¢) + No "7,000-7,199" (81¢) = $1.55 spent, $1.00 guaranteed return, $0.55 locked
+
+**Important Notes:**
+- Collateral return applies only to mutually exclusive outcomes
+- Does NOT apply to non-exclusive markets where multiple outcomes can occur
+- Typically applies to No positions in mutually exclusive multi-outcome events
+- Look for "mutually exclusive" language in market rules
+
+**Limitation:**
+- Enabling may prevent selling positions for which collateral already returned
+- Eligibility determined at event level, cannot be changed after order placement
+
+---
+
+### Flip Selling - Technical Details
+
+**Mechanics:**
+- Sell more contracts than currently owned
+- Platform automatically: (1) Sells existing contracts, (2) Buys opposite side contracts to fulfill order
+- Net result: Position flips from one side to other
+
+**Example:**
+- Current position: 5 No contracts
+- Place sell order: 10 No contracts
+- Platform executes: Sell 5 No + Buy 5 Yes
+- Final position: 5 Yes contracts
+
+**Fee Treatment:**
+- Charged trading fees on both legs (sell + buy)
+- No special fee treatment for flip selling
+
+---
+
+### Market Rules Structure
+
+**Rules Summary (abbreviated):**
+- What's being measured
+- Timeline for prediction market
+- Verification source for outcome determination
+- Can be filtered by different strikes
+- Does not contain complete rulebook text
+
+**Full Rules:**
+- Access by selecting "View full rules" below summary
+- Complete regulatory text
+- More detailed than summary
+
+**Additional Details:**
+- Optional section on market page
+- Contains clarifications about rule interpretation
+- Added by markets team at their discretion when traders confused
+- Kalshi has no obligation to add additional details
+
+---
+
+### Timeline and Payout
+
+**Market Closure Types:**
+
+1. **Closure when outcome occurs:**
+   - Market closes immediately when event happens
+   - Trading stops as soon as outcome determined
+
+2. **Closure at listed date/time:**
+   - Market closes at predetermined time
+   - Outcome may already be known or still pending
+
+3. **Hybrid closure:**
+   - Market closes when outcome occurs OR at specified date/time if outcome never occurs
+   - Common in event-driven markets
+   - Example language: "This market will close and expire early if the event occurs. Otherwise, it closes by [date] at [time]."
+
+**Settlement Timeline:**
+- Varies significantly by market (30 minutes to multiple days)
+- Timing depends on verification source data availability
+- Source specified in market contract terms
+- Check "Projected payout" in Timeline section for specific market
+
+**Where to Find:**
+- Each market has "Timeline and Payout" section
+- Full closure description typically provided
+- Projected payout timing displayed
+
+---
+
+### The Orderbook - Technical Details
+
+**What's Displayed:**
+- All resting limit orders
+- Quantity available at each price level
+- Prices for each order
+
+**Definition:**
+- Resting order = Limit order not immediately matched, sitting on orderbook
+
+**Toggle Options:**
+- View as bids (maximum price buyers willing to pay)
+- View as asks (minimum price sellers willing to accept)
+
+**Reading the Orderbook:**
+
+*Yes side example:*
+- Bids: 75,000 contracts at $0.71 (highest bid = best price buyers offer)
+- Asks: 5,010 contracts at $0.74 (lowest ask = best price sellers offer)
+- Spread: $0.03
+
+*No side example:**
+- Bids: 5,010 contracts at $0.26 (highest bid)
+- Asks: 75,000 contracts at $0.29 (lowest ask)
+- Spread: $0.03
+
+**Key Terms:**
+- **Bid:** Maximum price buyer willing to pay
+- **Ask:** Minimum price seller willing to accept
+- **Spread:** Difference between highest bid and lowest ask
+- **Resting order:** Unfilled limit order on orderbook
+
+---
+
+### Market Outcomes and Resolution
+
+**Determination Process:**
+- Based on rules specified in contract terms and conditions
+- Uses information from designated verification source
+- Kalshi determines outcome after contract expiration
+- Can involve single source or multiple news sources depending on market
+
+**Timing:**
+- Varies by market from 30 minutes to multiple days
+- Depends on when data received from verification source
+
+**Kalshi's Approach:**
+- Unbiased, rules-based determination
+- Meticulous adherence to predetermined rules
+- Fair resolution and market integrity prioritized
+
+**Questions:**
+- Contact markets team for clarification before trading
+- Better to ask before trading than dispute after
+
+---
+
+### Market Data and Visualization
+
+**Forecast Graph:**
+- Displays traders' collective predictions about settlement value
+- NOT real-time measurement of actual event
+- Aggregation of all trades in market
+- Represents trader consensus/expectations
+- Example: Shows 6.8 inches = traders collectively expect ~6.8 inches based on trading activity
+
+**Odds Graph:**
+- Visual representation of market participants' beliefs about probability
+- Shows percentage likelihood based on current prices
+- NOT absolute probabilities - represents consensus beliefs
+- Updates in real-time as trades occur
+- Influenced by new information and market activity
+
+**Live Data Graphs:**
+- Real-time data from external databases/feeds
+- Shows actual measurements of underlying event
+- Updates continuously from official data sources
+- Helps assess how predictions compare to reality
+
+**Critical Distinction:**
+- Live data graph may have delay vs. official verification source
+- Market outcome determined by verification source in rules, NOT live data graph
+- Final settlement depends on official verification source specified in market rules
+
+---
+
+### Market Participation Requests
+
+**Suggesting New Market:**
+- Submit via Kalshi's market suggestion form
+- Markets team reviews for: CFTC compliance, manipulation resistance, user interest
+- No guarantee suggested market will be listed
+- Continue suggesting even if previous suggestions not implemented
+
+**Request Additional Strikes:**
+1. Navigate to specific market
+2. Click options icon (lower right corner)
+3. Select 'Request Additional Strikes' tab
+4. Submit preferred strike price
+- Markets team reviews and adds if deemed appropriate
+
+**Request to Settle Market:**
+1. Click options icon (lower right corner) on specific market
+2. Select 'Request to Settle' feature
+3. Choose which strike(s) should be settled
+4. Submit request
+- Markets team thoroughly reviews all settlement requests
+
+---
+
+### Price Determination Mechanics
+
+**Price-Probability Relationship:**
+- Contract price = Market-assigned probability expressed as percentage
+- Range: $0.01 to $0.99
+- Yes at 70¢ = Market assigns 70% probability to event occurring
+- No at 30¢ = Market assigns 30% probability to event not occurring
+- At settlement: Yes + No = $1.00 (exactly one side pays $1.00)
+
+**Price Discovery:**
+- Prices fluctuate based on collective trader sentiment
+- Continuous real-time adjustment as new trades occur
+- More Yes buyers → Yes price rises, No price falls
+- More No buyers → No price rises, Yes price falls
+
+**Order Matching:**
+- Kalshi matches buyers and sellers with opposing views
+- Combined investment from both sides = $1.00 at settlement
+- Winner receives $1.00, loser receives $0.00
+
+**Example:**
+- Market: "Will company launch product by year-end?"
+- Market consensus: 70% likely
+- Yes price: 70¢, No price: 30¢
+- Buy Yes at 70¢: If launch occurs, receive $1.00, profit 30¢
+- Buy No at 30¢: If launch doesn't occur, receive $1.00, profit 70¢
+
+---
+
+### Portfolio - Technical Details
+
+**Portfolio Composition:**
+- Cash funds in account
+- Current market value of open trading positions
+- Value of resting orders placed
+
+**Portfolio Value:**
+- Fluctuates based on price changes in markets being traded
+
+**Information Displayed:**
+1. Number of contracts purchased
+2. Average purchase price
+3. Current position value
+4. Total potential payout if positions win
+
+---
+
+### Cash - Technical Details
+
+**Definition:**
+- Unallocated funds not invested in positions or markets
+- Liquid assets immediately available
+
+**Characteristics:**
+- Can be quickly allocated to trades
+- Can be withdrawn as needed
+- No waiting for funds to clear
+
+**Deposit Process:**
+- Deposited funds initially go to cash balance
+- From cash balance, can purchase positions in any open market
+
+**Withdrawal Process:**
+- **Only funds in 'cash' tab are eligible for withdrawal**
+- Must move all funds to 'cash' category before withdrawal
+- Close positions or cancel orders to free up funds
+
+---
+
+### APY on Kalshi - Technical Details
+
+**Interest Rate:**
+- Current rate: 3.75% APY
+- Variable rate (can change at any time)
+
+**Eligibility:**
+- Available for eligible users in United States and its territories
+- Minimum balance: $250
+- Only paid on balances of $250 or more
+
+**Interest Accrual:**
+- Applies to cash balance
+- Applies to underlying collateral for open positions
+- Calculated daily
+- Paid monthly
+
+**Calculation Method:**
+- Based on net portfolio value at exchange close each day
+- Net value = Available cash + Portfolio value (based on last traded prices)
+
+**Payment Schedule:**
+- Normally paid within first week of following month
+- Can take up to 10 business days to process
+- Kalshi passes on interest received from banking partners
+
+---
+
+### Finding Markets - Navigation
+
+**Market Categories:**
+- Politics, Sports, Culture, Crypto, and others
+- Broad array across various sectors
+
+**Navigation Methods:**
+1. **Topic Tabs:** Browse by sector/category
+2. **Trending Filter:** View currently popular markets
+3. **Search:** Find specific markets directly
+
+---
+
+### Volume Incentive Program - Technical Details
+
+**Program Dates:**
+- Start: September 15, 2025
+- End: September 1, 2026
+- Can be ended or modified at any time by Kalshi
+
+**Eligibility:**
+
+*Can participate:*
+- Most regular Kalshi members
+
+*Cannot participate:*
+- Kalshi affiliates and employees
+- Market makers with existing agreements
+- Introducing Brokers, FCMs, and their customers
+
+**How It Works:**
+1. Trade in eligible markets during active reward periods
+2. Trading volume tracked throughout period
+3. Receive share of reward pool based on percentage of total volume
+4. Calculation: (Your volume ÷ Total volume) × Reward pool = Your reward
+
+**Market Selection:**
+- All Kalshi markets potentially eligible
+- Active reward periods marked on market pages
+- Each market shows current reward pools and period duration
+
+**Eligible Trades:**
+
+*What counts:*
+- Contracts priced between $0.03 and $0.97 (non-inclusive)
+- Trades during active reward periods
+
+*What doesn't count:*
+- Contracts below $0.03 or above $0.97
+- Special market maker trades
+- Trades outside reward periods
+
+**Reward Structure:**
+- Reward periods: Up to 31 days each
+- Pool distribution: Proportional to trading volume
+- Earnings cap: Maximum $0.005 per contract traded
+- Cap example: 1,000 contracts traded = maximum $5 reward
+
+**Payment Timing:**
+- Programs ending by 10 AM ET: Paid same day by 3 PM ET
+- Programs ending after 10 AM ET: Paid next day by 3 PM ET
+
+**Program Rules:**
+- Kalshi monitors for abusive behavior and fake trading
+- Participant status can be revoked for violations
+- Program may be terminated at any time
+
+**Transparency:**
+- Market pages show eligibility status
+- Current reward periods displayed
+- Future reward periods shown when planned
+
+---
+
+### Liquidity Incentive Program - Technical Details
+
+**Program Dates:**
+- Start: September 15, 2025
+- End: September 1, 2026
+- Can be ended or modified at any time by Kalshi
+
+**Eligibility:**
+- Same as Volume Incentive Program
+
+**How It Works:**
+1. Place resting limit orders in eligible markets
+2. Kalshi takes snapshots every second during trading hours
+3. Orders scored based on size and proximity to best prices
+4. Earn share of reward pool based on liquidity contribution score
+
+**Market Selection:**
+- All Kalshi markets potentially eligible
+- Active reward periods marked on market pages
+- Each market shows liquidity incentive schedule
+
+**Scoring Parameters (Set Per Time Period):**
+- **Target Size:** 100-20,000 contracts (minimum liquidity threshold to be met)
+- **Discount Factor:** Up to 1.00 (penalty multiplier for orders away from best price)
+- **Reference Price:** Best bid/ask prices used as baseline
+
+**Score Calculation Process:**
+
+*Step 1 - Snapshot Scoring:*
+- Random snapshots every second during trading hours
+- Only orders helping reach Target Size qualify for points
+- Each qualifying order scored on: Order size (larger = higher score) + Distance from best price (closer = higher score)
+
+*Step 2 - Distance Penalty:**
+- Orders at best bid/ask: Full credit (1.0x multiplier)
+- Orders further away: Reduced credit based on Discount Factor
+
+*Step 3 - Size Weighting:*
+- Snapshot score = Order Size × Distance Multiplier
+- Multiple orders at different price levels all contribute
+
+*Step 4 - Total Score:*
+- Final score = Sum of all snapshot scores during time period
+- Reward = (Your Score ÷ Total All Participants' Scores) × Reward Pool
+
+**Rewards Structure:**
+- Time periods: Up to 31 days each
+- Daily rewards: $10-$1,000 per day
+- Minimum payout: $1.00 (rounded down to nearest cent)
+
+**Payment Timing:**
+- Programs ending by 10 AM ET: Paid same day by 3 PM ET
+- Programs ending after 10 AM ET: Paid next day by 3 PM ET
+
+**Program Rules:**
+- Kalshi monitors for abusive behavior and market manipulation
+- Participant status can be revoked for violations
+- Program may be terminated at any time
+
+**Transparency:**
+- All schedules and parameters displayed publicly
+- Market pages show eligibility and reward information
