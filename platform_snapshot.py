@@ -329,26 +329,45 @@ class KalshiSnapshot:
             open_interest = sum(m.get('open_interest', 0) for m in markets)
             event['calculated_open_interest'] = open_interest
 
-            # Calculate price range (convert from dollar strings to cents)
+            # Calculate price range and ME sums (Bid/Ask/Last)
             prices = []
+            bid_sum = 0
+            ask_sum = 0
+            outcome_names = []
+            
             for m in markets:
-                # Try to get last_price_dollars, fallback to yes_bid_dollars
+                # Last Price
                 price_str = m.get('last_price_dollars') or m.get('yes_bid_dollars', '0')
                 try:
-                    price_float = float(price_str)
-                    price_cents = int(price_float * 100)
+                    price_cents = int(float(price_str) * 100)
                     prices.append(price_cents)
                 except (ValueError, TypeError):
-                    continue
+                    pass
+                
+                # Order Book
+                try:
+                    bid_sum += int(float(m.get('yes_bid_dollars', 0)) * 100)
+                    ask_sum += int(float(m.get('yes_ask_dollars', 0)) * 100)
+                except (ValueError, TypeError):
+                    pass
+                
+                # Outcome Name
+                name = m.get('yes_sub_title') or m.get('subtitle') or m.get('ticker')
+                if name:
+                    outcome_names.append(name)
 
             if prices:
                 event['price_min'] = min(prices)
                 event['price_max'] = max(prices)
-                # Calculate sum for ME events
                 if event.get('mutually_exclusive', False):
                     event['sum_yes_cents'] = sum(prices)
+                    event['sum_yes_bid'] = bid_sum
+                    event['sum_yes_ask'] = ask_sum
+                    event['outcomes'] = outcome_names
                 else:
                     event['sum_yes_cents'] = None
+                    event['sum_yes_bid'] = None
+                    event['sum_yes_ask'] = None
             else:
                 event['price_min'] = 0
                 event['price_max'] = 0
@@ -363,34 +382,29 @@ class KalshiSnapshot:
                 close_time_str = m.get('close_time')
                 if close_time_str:
                     try:
-                        # Clean string and convert to datetime
                         ct_clean = close_time_str.replace('Z', '+00:00')
                         close_dt = datetime.fromisoformat(ct_clean)
                         close_times.append(close_dt)
-                        
-                        # Only track future close times for actionable discovery
                         if close_dt > now:
                             future_close_times.append(close_dt)
                     except (ValueError, TypeError):
                         continue
 
-            # Event is truly tradeable if it has at least one future market
             if future_close_times:
                 event['closest_close_time'] = min(future_close_times)
                 event['is_actionable'] = True
             elif close_times:
-                # All markets are in the past
                 event['closest_close_time'] = min(close_times)
                 event['is_actionable'] = False
             else:
                 event['closest_close_time'] = datetime.max.replace(tzinfo=timezone.utc)
                 event['is_actionable'] = False
 
-            # Get creation time for sorting - Fix parsing for older ISO formats
-            created_time_str = markets[0].get('created_time') if markets else None
-            if created_time_str:
+            # Get creation time for sorting - Use open_time for better accuracy
+            open_time_str = markets[0].get('open_time') if markets else None
+            if open_time_str:
                 try:
-                    event['created_time'] = datetime.fromisoformat(created_time_str.replace('Z', '+00:00'))
+                    event['created_time'] = datetime.fromisoformat(open_time_str.replace('Z', '+00:00'))
                 except (ValueError, TypeError):
                     event['created_time'] = datetime.min.replace(tzinfo=timezone.utc)
             else:
@@ -482,9 +496,15 @@ class KalshiSnapshot:
             if 85 <= e['price_max'] <= 97 and e['calculated_volume'] > 20000:
                 signals['certainty_gaps'].append(e)
                 
-            # 3. Arbitrage (ME deviation > 3c)
-            if e.get('sum_yes_cents') and abs(e['sum_yes_cents'] - 100) >= 3:
-                signals['arbitrage'].append(e)
+            # 3. Arbitrage (Triggered by Order Book)
+            if e.get('sum_yes_bid') is not None:
+                # Real Sell Arb (Sum of Bids > 100)
+                # Real Buy Arb (Sum of Asks < 100)
+                if e['sum_yes_bid'] > 100 or e['sum_yes_ask'] < 100:
+                    signals['arbitrage'].append(e)
+                # Also include major Last Price deviations for context (> 5c)
+                elif abs(e['sum_yes_cents'] - 100) >= 5:
+                    signals['arbitrage'].append(e)
                 
             # 4. Momentum (Top 24h volume) - we'll sort after
             if e['calculated_volume_24h'] > 5000:
@@ -497,13 +517,18 @@ class KalshiSnapshot:
 
         # Sort and limit signals
         signals['closing_urgency'].sort(key=lambda x: x['closest_close_time'])
-        signals['certainty_gaps'].sort(key=lambda x: x['price_max'], reverse=True)
-        signals['arbitrage'].sort(key=lambda x: abs(x['sum_yes_cents'] - 100), reverse=True)
+        # Certainty Gaps: Priority to Closing Soonest
+        signals['certainty_gaps'].sort(key=lambda x: x['closest_close_time'])
+        signals['arbitrage'].sort(key=lambda x: max(abs(x.get('sum_yes_bid', 100) - 100), abs(x.get('sum_yes_ask', 100) - 100)), reverse=True)
         signals['momentum'].sort(key=lambda x: x['calculated_volume_24h'], reverse=True)
         signals['fresh_alpha'].sort(key=lambda x: x['created_time'], reverse=True)
 
-        for key in signals:
-            signals[key] = signals[key][:10]
+        # Limit all except certainty gaps
+        signals['closing_urgency'] = signals['closing_urgency'][:10]
+        signals['arbitrage'] = signals['arbitrage'][:10]
+        signals['momentum'] = signals['momentum'][:10]
+        signals['fresh_alpha'] = signals['fresh_alpha'][:10]
+        # certainty_gaps remains unlimited per request
 
         print(f"✓ Analysis complete: {filtered_count} events after filters", file=sys.stderr)
 
@@ -870,21 +895,28 @@ def format_markdown(snapshot: Dict[str, Any], top_n: int = 25) -> str:
     
     # 1. Arbitrage
     if signals.get('arbitrage'):
-        lines.append("### ⚖️ Arbitrage Opportunities (ME Logic)")
-        for i, e in enumerate(signals['arbitrage'][:5], 1):
-            dev = e['sum_yes_cents'] - 100
-            dev_str = f"+{dev}¢ (SELL)" if dev > 0 else f"{dev}¢ (BUY)"
-            url = f"https://kalshi.com/markets/{e['event_ticker']}"
-            lines.append(f"{i}. **[{e['title']}]({url})**")
-            lines.append(f"   - **Arb Deviation:** `{dev_str}` | **Sum:** `${e['sum_yes_cents']/100:.2f}`")
-            lines.append(f"   - **Volume:** `{format_number(e['calculated_volume'])}` | **Ticker:** `{e['event_ticker']}`")
+        lines.append("### ⚖️ Arbitrage Opportunities (Order Book Math)")
+        for i, e in enumerate(signals['arbitrage'][:10], 1):
+            url = f"https://kalshi.com/event/{e['event_ticker']}"
+            bid_sum = e.get('sum_yes_bid', 0)
+            ask_sum = e.get('sum_yes_ask', 0)
+            last_sum = e.get('sum_yes_cents', 0)
+            
+            status = "Historical"
+            if bid_sum > 100: status = "🔥 SELL ARB"
+            elif ask_sum < 100 and ask_sum > 0: status = "🔥 BUY ARB"
+            
+            lines.append(f"{i}. **[{e['title']}]({url})** — `{status}`")
+            lines.append(f"   - **Order Book:** Bids: `${bid_sum/100:.2f}` | Asks: `${ask_sum/100:.2f}` | Last: `${last_sum/100:.2f}`")
+            lines.append(f"   - **Outcomes:** {', '.join(e.get('outcomes', [])[:6])}{'...' if len(e.get('outcomes', [])) > 6 else ''}")
+            lines.append(f"   - **Liquidity:** Vol: `{format_number(e['calculated_volume'])}` | Ticker: `{e['event_ticker']}`")
         lines.append("")
 
     # 2. Closing Urgency
     if signals.get('closing_urgency'):
         lines.append("### 🔴 Closing Soon (Temporal Urgency)")
         for i, e in enumerate(signals['closing_urgency'][:5], 1):
-            url = f"https://kalshi.com/markets/{e['event_ticker']}"
+            url = f"https://kalshi.com/event/{e['event_ticker']}"
             lines.append(f"{i}. **[{e['title']}]({url})**")
             lines.append(f"   - **Closes in:** `{format_close_date(e['closest_close_time'])}` | **Volume:** `{format_number(e['calculated_volume'])}`")
             lines.append(f"   - **Price Range:** `{format_price_range(e['price_min'], e['price_max'])}`")
@@ -893,18 +925,18 @@ def format_markdown(snapshot: Dict[str, Any], top_n: int = 25) -> str:
     # 3. Certainty Gaps
     if signals.get('certainty_gaps'):
         lines.append("### 🎯 Certainty Gaps (85-97¢)")
-        for i, e in enumerate(signals['certainty_gaps'][:5], 1):
-            url = f"https://kalshi.com/markets/{e['event_ticker']}"
+        for i, e in enumerate(signals['certainty_gaps'], 1):
+            url = f"https://kalshi.com/event/{e['event_ticker']}"
             lines.append(f"{i}. **[{e['title']}]({url})**")
             lines.append(f"   - **Top Market:** `{e['price_max']}¢` | **Volume:** `{format_number(e['calculated_volume'])}`")
-            lines.append(f"   - **Closes in:** `{format_close_date(e['closest_close_time'])}`")
+            lines.append(f"   - **Closes in:** `{format_close_date(e['closest_close_time'])}` | **Ticker:** `{e['event_ticker']}`")
         lines.append("")
 
     # 4. Momentum
     if signals.get('momentum'):
         lines.append("### 📈 Momentum (24h Volume)")
         for i, e in enumerate(signals['momentum'][:5], 1):
-            url = f"https://kalshi.com/markets/{e['event_ticker']}"
+            url = f"https://kalshi.com/event/{e['event_ticker']}"
             lines.append(f"{i}. **[{e['title']}]({url})**")
             lines.append(f"   - **24h Vol:** `{format_number(e['calculated_volume_24h'])}` | **Price:** `{e['price_max']}¢`")
         lines.append("")
@@ -941,7 +973,7 @@ def format_markdown(snapshot: Dict[str, Any], top_n: int = 25) -> str:
             created_dt = event.get('created_time', datetime.min.replace(tzinfo=None))
             close_dt = event.get('closest_close_time', datetime.max.replace(tzinfo=None))
             ticker = event.get('event_ticker', 'N/A')
-            url = f"https://kalshi.com/markets/{ticker}"
+            url = f"https://kalshi.com/event/{ticker}"
             
             lines.append(f"#### {i}. [{event.get('title', 'Unknown')}]({url}) (`{ticker}`)")
             lines.append(f"- **Price Range:** `{format_price_range(event['price_min'], event['price_max'])}`")
