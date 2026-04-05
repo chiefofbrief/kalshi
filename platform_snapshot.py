@@ -318,16 +318,16 @@ class KalshiSnapshot:
             markets = event.get('markets', [])
 
             # Calculate total volume
-            event_volume = sum(m.get('volume', 0) for m in markets)
-            event['calculated_volume'] = event_volume
+            event_volume = sum(float(m.get('volume_fp', m.get('volume', 0))) for m in markets)
+            event['calculated_volume'] = int(event_volume)
 
             # Calculate 24h volume
-            volume_24h = sum(m.get('volume_24h', 0) for m in markets)
-            event['calculated_volume_24h'] = volume_24h
+            volume_24h = sum(float(m.get('volume_24h_fp', m.get('volume_24h', 0))) for m in markets)
+            event['calculated_volume_24h'] = int(volume_24h)
 
             # Calculate open interest
-            open_interest = sum(m.get('open_interest', 0) for m in markets)
-            event['calculated_open_interest'] = open_interest
+            open_interest = sum(float(m.get('open_interest_fp', m.get('open_interest', 0))) for m in markets)
+            event['calculated_open_interest'] = int(open_interest)
 
             # Calculate price range and ME sums (Bid/Ask/Last)
             prices = []
