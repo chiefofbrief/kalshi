@@ -8,40 +8,50 @@ from rich.table import Table
 
 # API Config
 BASE_URL = "https://api.elections.kalshi.com/trade-api/v2/"
-PREFERRED = ["Economics", "Politics", "Crypto", "Companies", "Financials", "Science and Technology", "Elections"]
+
+# STRICT CATEGORY LIMIT (Mirrors Platform Snapshot)
+CORE_CATEGORIES = [
+    "Economics", "Financials", "Companies", "Politics", 
+    "Elections", "Science and Technology", "Crypto"
+]
 
 def get_discovery_pool():
-    """Path A: Broad Temporal Scan (60 days) + Path B: Category Deep-Dive."""
-    max_close = int((datetime.now(timezone.utc) + timedelta(days=60)).timestamp())
-    params = {'limit': 1000, 'status': 'open', 'max_close_ts': max_close}
-    
+    """Fetches markets ONLY from the Core Categories."""
     markets = []
-    try:
-        r = requests.get(f"{BASE_URL}markets", params=params)
-        markets.extend(r.json().get('markets', []))
-        
-        for cat in ["Economics", "Politics", "Crypto"]:
-            r = requests.get(f"{BASE_URL}events", params={'limit': 100, 'status': 'open', 'category': cat, 'with_nested_markets': 'true'})
+    # Path: Category Deep-Dive for the Big Seven
+    for cat in CORE_CATEGORIES:
+        try:
+            # Note: with_nested_markets=true gives us the price data we need immediately
+            r = requests.get(f"{BASE_URL}events", params={
+                'limit': 200, 
+                'status': 'open', 
+                'category': cat, 
+                'with_nested_markets': 'true'
+            })
             for e in r.json().get('events', []):
                 for m in e.get('markets', []):
                     m['event_ticker_actual'] = e.get('ticker')
+                    m['category_actual'] = cat # Ensure we keep the core category name
                     markets.append(m)
-    except: pass
+        except: continue
+    
+    # Deduplicate by ticker (just in case)
     return {m['ticker']: m for m in markets}.values()
 
 def scan():
     console = Console()
     now = datetime.now(timezone.utc)
     
-    with console.status("[bold blue]Performing Precision Discovery..."):
+    with console.status(f"[bold blue]Scouting Certainty Gaps in {len(CORE_CATEGORIES)} Core Categories..."):
         pool = get_discovery_pool()
     
     found = []
     for m in pool:
         try:
             bid = Decimal(m.get('yes_bid_dollars', '0'))
+            # Certainty Gap Range: 80-96c
             if Decimal('0.80') <= bid <= Decimal('0.96'):
-                # Timing: HARD CLOSE TIME ONLY
+                # Timing: HARD CLOSE TIME (Source of Truth)
                 p_str = m.get('close_time')
                 if not p_str: continue
                 
@@ -53,7 +63,9 @@ def scan():
                 roi = ((Decimal('0.99') - bid) / bid) * 100
                 ann_roi = roi * (Decimal('365') / days)
                 
+                # UI Link
                 s_ticker = m.get('series_ticker') or m.get('ticker', '').split('-')[0]
+                ui_link = f"https://kalshi.com/markets/{s_ticker.lower()}"
                 
                 found.append({
                     'title': m.get('title'),
@@ -62,32 +74,37 @@ def scan():
                     'bid': bid,
                     'ann': ann_roi,
                     'days': float(days),
-                    'cat': m.get('category', 'Misc'),
-                    'url': f"https://kalshi.com/markets/{s_ticker.lower()}"
+                    'cat': m.get('category_actual', 'Misc'),
+                    'url': ui_link
                 })
         except: continue
 
+    # Sort by Annualized ROI
     found.sort(key=lambda x: x['ann'], reverse=True)
 
-    table = Table(title="💎 Certainty Gap Discovery (Hard Close Only)")
+    # Show Top 25
+    table = Table(title=f"💎 Certainty Gaps: {', '.join(CORE_CATEGORIES[:3])}...")
     table.add_column("Market", width=45)
     table.add_column("Price")
     table.add_column("Ann. ROI", justify="right", style="bold green")
     table.add_column("Close In", justify="right", style="cyan")
+    table.add_column("Category", style="dim")
     
     for o in found[:25]:
-        table.add_row(o['title'][:42]+"...", f"${o['bid']}", f"{o['ann']:,.0f}%", f"{o['days']:.1f}d")
+        table.add_row(o['title'][:42]+"...", f"${o['bid']}", f"{o['ann']:,.0f}%", f"{o['days']:.1f}d", o['cat'])
     
     console.print(table)
     
-    with open("master_gap_report.md", "w") as f:
-        f.write("# Master Certainty Gap Report (Hard Close Only)\n\n")
-        f.write("| Market | Price | ROI (Ann) | Close In | URL | Drilldown |\n")
+    # Save Report
+    report_name = "core_gap_report.md"
+    with open(report_name, "w") as f:
+        f.write(f"# Core Certainty Gap Report\nLimited to: {', '.join(CORE_CATEGORIES)}\n\n")
+        f.write("| Market | Category | Price | ROI (Ann) | Close In | Drilldown |\n")
         f.write("| :--- | :--- | :--- | :--- | :--- | :--- |\n")
         for o in found[:100]:
-            f.write(f"| {o['title']} | ${o['bid']} | {o['ann']:,.0f}% | {o['days']:.1f}d | [Trade]({o['url']}) | `python event_drilldown.py {o['e_ticker']}` |\n")
+            f.write(f"| [{o['title']}]({o['url']}) | {o['cat']} | ${o['bid']} | {o['ann']:,.0f}% | {o['days']:.1f}d | `python event_drilldown.py {o['e_ticker']}` |\n")
     
-    console.print(f"\n[bold green]✅ Master report saved to master_gap_report.md[/bold green]")
+    console.print(f"\n[bold green]✅ Limited report saved to {report_name}[/bold green]")
 
 if __name__ == "__main__":
     scan()
