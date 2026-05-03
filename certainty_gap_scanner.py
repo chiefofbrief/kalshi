@@ -16,24 +16,32 @@ CORE_CATEGORIES = [
 ]
 
 def get_discovery_pool():
-    """Fetches markets ONLY from the Core Categories."""
+    """Fetches markets ONLY from the Core Categories, paginating each fully."""
     markets = []
-    # Path: Category Deep-Dive for the Big Seven
     for cat in CORE_CATEGORIES:
-        try:
-            # Note: with_nested_markets=true gives us the price data we need immediately
-            r = requests.get(f"{BASE_URL}events", params={
-                'limit': 200, 
-                'status': 'open', 
-                'category': cat, 
-                'with_nested_markets': 'true'
-            })
-            for e in r.json().get('events', []):
-                for m in e.get('markets', []):
-                    m['event_ticker_actual'] = e.get('ticker')
-                    m['category_actual'] = cat # Ensure we keep the core category name
-                    markets.append(m)
-        except: continue
+        cursor = None
+        while True:
+            try:
+                params = {
+                    'limit': 200,
+                    'status': 'open',
+                    'category': cat,
+                    'with_nested_markets': 'true'
+                }
+                if cursor:
+                    params['cursor'] = cursor
+                r = requests.get(f"{BASE_URL}events", params=params)
+                data = r.json()
+                for e in data.get('events', []):
+                    for m in e.get('markets', []):
+                        m['event_ticker_actual'] = e.get('ticker')
+                        m['category_actual'] = cat
+                        markets.append(m)
+                cursor = data.get('cursor')
+                if not cursor:
+                    break
+            except:
+                break
     
     # Deduplicate by ticker (just in case)
     return {m['ticker']: m for m in markets}.values()
